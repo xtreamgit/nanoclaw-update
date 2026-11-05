@@ -1,0 +1,30 @@
+/* Bundle theme — inlined into viz.html after the built-in styles, so anything
+ * here wins by cascade order. This file is yours; viz.mjs never rewrites it.
+ *
+ * Never edit viz.html directly: it is regenerated from the Markdown on every
+ * render, and hand edits are lost. Style here instead.
+ *
+ * Most of the look is driven by these tokens — uncomment and adjust before
+ * reaching for individual selectors.
+ */
+
+/*
+:root {
+  --violeta: #6200EA;
+  --azul:    #376CF5;
+  --teal:    #2BD9C8;
+
+  --bg:    #101014;
+  --panel: #17171d;
+  --line:  #26262f;
+  --ink:   #e8e8ef;
+  --dim:   #8b8b9b;
+}
+*/
+
+/* Layout hooks, if you need them:
+ *   header            top bar (h1, .pill, .meta)
+ *   #files            left sidebar, the file list
+ *   #graph  #svg      center canvas
+ *   #detail           right pane, selected concept
+ */

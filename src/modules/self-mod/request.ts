@@ -21,6 +21,7 @@ import { getContainerConfig } from '../../db/container-configs.js';
 import { log } from '../../log.js';
 import type { Session } from '../../types.js';
 import { notifyAgent, requestApproval } from '../approvals/index.js';
+import { protectedMcpViolation } from './protected-config.js';
 
 export async function validateInstallPackages(content: Record<string, unknown>, session: Session): Promise<boolean> {
   const agentGroup = await getAgentGroup(session.agent_group_id);
@@ -123,6 +124,19 @@ export async function validateAddMcpServer(content: Record<string, unknown>, ses
     // eslint-disable-next-line no-catch-all/no-catch-all -- parse failures are expected user input errors
   } catch (err) {
     await notifyAgent(session, `add_mcp_server failed: ${err instanceof Error ? err.message : String(err)}.`);
+    return false;
+  }
+
+  // Layer 3: refuse protected servers and raw secrets before any approval
+  // card. Runs on the original request and on the approved replay, because
+  // precheck runs on every consult. Host ncl is a different path.
+  const violation = protectedMcpViolation({
+    name: serverName,
+    env: serverConfig.type === 'http' ? undefined : serverConfig.env,
+    headers: serverConfig.type === 'http' ? serverConfig.headers : undefined,
+  });
+  if (violation) {
+    await notifyAgent(session, `add_mcp_server refused: ${violation}`);
     return false;
   }
 

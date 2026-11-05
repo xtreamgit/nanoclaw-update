@@ -27,6 +27,7 @@ import { log } from '../../log.js';
 import { writeSessionMessage } from '../../session-manager.js';
 import type { Session } from '../../types.js';
 import { notifyAgent } from '../approvals/index.js';
+import { protectedMcpViolation } from './protected-config.js';
 
 async function wakeSessionById(sessionId: string): Promise<void> {
   const session = await getSession(sessionId);
@@ -134,6 +135,16 @@ export async function applyAddMcpServer(payload: Record<string, unknown>, sessio
     );
     return;
   }
+  const violation = protectedMcpViolation({
+    name,
+    env: serverConfig.type === 'http' ? undefined : serverConfig.env,
+    headers: serverConfig.type === 'http' ? serverConfig.headers : undefined,
+  });
+  if (violation) {
+    await notifyAgent(session, `add_mcp_server refused: ${violation}`);
+    return;
+  }
+
   const servers = JSON.parse(configRow.mcp_servers) as Record<string, McpServerConfig>;
   // Re-checked here (not only at request time): an approval can race a restamp
   // that stamped a plugin server under this name after the card went out.

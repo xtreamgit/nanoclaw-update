@@ -6,7 +6,8 @@
  * (command + args + env, executed on approve — see apply.ts). The card must
  * show every field that will actually be applied — JSON-encoded, invisibles
  * escaped, fenced, secret-shaped values redacted to a byte-count + sha256
- * fingerprint (applied verbatim from the payload) — and bad input (types,
+ * fingerprint (applied verbatim from the payload). Credential-named env keys
+ * and protected servers are refused before a card exists (Layer 3). Bad input (types,
  * counts, oversized payloads or cards) must be rejected before an approval
  * row is even created.
  *
@@ -333,6 +334,29 @@ describe('add_mcp_server validation', () => {
     await expectRejected();
   });
 
+  it('refuses a protected server before creating an approval', async () => {
+    await submitAddMcpServer(
+      { name: 'email-imap', command: 'node', env: { MCP_EMAIL_SERVER_PASSWORD: 'gateway-managed' } },
+      session,
+    );
+
+    expect(await getPendingApprovalsByAction('add_mcp_server')).toHaveLength(0);
+    expect(lastNotifyText()).toMatch(/add_mcp_server refused:.*operator-managed/i);
+  });
+
+  it('refuses a raw credential env key before creating an approval', async () => {
+    await submitAddMcpServer({ name: 'safe', command: 'node', env: { SERVICE_TOKEN: 'not-a-real-secret' } }, session);
+
+    expect(await getPendingApprovalsByAction('add_mcp_server')).toHaveLength(0);
+    expect(lastNotifyText()).toMatch(/raw credentials/i);
+  });
+
+  it('allows a gateway placeholder on a non-protected server', async () => {
+    await submitAddMcpServer({ name: 'linear', command: 'node', env: { LINEAR_API_KEY: 'gateway-managed' } }, session);
+
+    expect(await getPendingApprovalsByAction('add_mcp_server')).toHaveLength(1);
+  });
+
   it('rejects a non-record env before creating an approval', async () => {
     await submitAddMcpServer({ name: 'bad', command: 'node', env: ['not', 'a', 'record'] }, session);
     await expectRejected();
@@ -413,21 +437,22 @@ describe('add_mcp_server secret redaction', () => {
   }
 
   it('redacts secret-shaped values on the card but keeps them verbatim in the payload', async () => {
-    const keyMatched = 'hunter2-secret-value'; // secret by env KEY (GITHUB_TOKEN)
-    const valueMatched = 'sk-abc123def456'; // secret by VALUE prefix under an innocuous key
-    const argSecret = 'ghp_deadbeefcafe1234'; // secret by VALUE prefix in args
+    // Credential-named keys are refused before a card (see validation tests).
+    // Value-prefix secrets under an innocuous key, and in args, still redact.
+    const valueMatched = 'sk-abc123def456';
+    const argSecret = 'ghp_deadbeefcafe1234';
     await submitAddMcpServer(
       {
         name: 'safe',
         command: 'node',
         args: ['--token', argSecret],
-        env: { GITHUB_TOKEN: keyMatched, HARMLESS: valueMatched, NODE_OPTIONS: '--require /x.js' },
+        env: { HARMLESS: valueMatched, NODE_OPTIONS: '--require /x.js' },
       },
       session,
     );
 
     const question = lastQuestion();
-    for (const secret of [keyMatched, valueMatched, argSecret]) {
+    for (const secret of [valueMatched, argSecret]) {
       expect(question).not.toContain(secret);
       expect(question).toContain(redactedForm(secret));
     }
@@ -443,7 +468,6 @@ describe('add_mcp_server secret redaction', () => {
       env: Record<string, string>;
     };
     expect(payload.args).toEqual(['--token', argSecret]);
-    expect(payload.env.GITHUB_TOKEN).toBe(keyMatched);
     expect(payload.env.HARMLESS).toBe(valueMatched);
   });
 

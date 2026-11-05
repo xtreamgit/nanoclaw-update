@@ -20,6 +20,7 @@ import { getMessagingGroupAgentByPair } from '../db/messaging-groups.js';
 import { getSession } from '../db/sessions.js';
 import { guard, type GuardActor } from '../guard/index.js';
 import { registerApprovalHandler, requestApproval } from '../modules/approvals/index.js';
+import { protectedMcpViolation } from '../modules/self-mod/protected-config.js';
 import type { PendingApproval } from '../types.js';
 import type { CallerContext, ErrorCode, RequestFrame, ResponseFrame } from './frame.js';
 import { normalizeArgs } from './args.js';
@@ -135,6 +136,18 @@ export async function dispatch(
 
   if (decision.effect === 'deny') {
     return err(req.id, 'forbidden', decision.reason);
+  }
+
+  // Layer 3: credential MCP config is operator-managed. Refuse an agent's
+  // add/remove of a protected server, or a raw secret, before an approval
+  // card is created and again on the approved replay (which re-enters here
+  // with the same agent caller). Host callers are exempt.
+  if (
+    ctx.caller === 'agent' &&
+    (req.command === 'groups-config-add-mcp-server' || req.command === 'groups-config-remove-mcp-server')
+  ) {
+    const violation = protectedMcpViolation({ name: req.args.name, env: req.args.env, headers: req.args.headers });
+    if (violation) return err(req.id, 'forbidden', violation);
   }
 
   // `--help` interception: answer with the command's generated help instead of

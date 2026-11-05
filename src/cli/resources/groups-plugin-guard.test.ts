@@ -91,6 +91,32 @@ describe('plugin-owned MCP server guard (ncl groups config)', () => {
     expect(JSON.parse((await getContainerConfig(groupId))!.mcp_servers).docs).toBeDefined();
   });
 
+  it('refuses an agent adding or removing a protected server before any approval', async () => {
+    const caller = { caller: 'agent' as const, sessionId: 's1', agentGroupId: groupId, messagingGroupId: 'mg-1' };
+    const added = await dispatch(
+      {
+        id: 'req-agent-add',
+        command: 'groups-config-add-mcp-server',
+        args: {
+          name: 'email-imap',
+          command: 'node',
+          env: JSON.stringify({ MCP_EMAIL_SERVER_PASSWORD: 'gateway-managed' }),
+        },
+      },
+      caller,
+    );
+    expect(added.ok).toBe(false);
+    if (!added.ok) expect(added.error.message).toMatch(/operator-managed/i);
+
+    const removed = await dispatch(
+      { id: 'req-agent-rm', command: 'groups-config-remove-mcp-server', args: { name: 'email-imap' } },
+      caller,
+    );
+    expect(removed.ok).toBe(false);
+    if (!removed.ok) expect(removed.error.message).toMatch(/operator-managed/i);
+    expect(JSON.parse((await getContainerConfig(groupId))!.mcp_servers)['email-imap']).toBeUndefined();
+  });
+
   it('leaves unmarked servers fully editable', async () => {
     const added = await run('groups-config-add-mcp-server', {
       id: groupId,
