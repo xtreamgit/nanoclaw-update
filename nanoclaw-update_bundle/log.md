@@ -1,5 +1,9 @@
 # Log
 
+## 2026-11-07 — Microsoft mail read broker
+
+Added a host-side broker at `src/microsoft-mail/` and the `/add-microsoft-mail` skill. It reads listed mailboxes through Microsoft Graph and has no send route. The Microsoft credential stays on the host. No tenant is connected yet. Upstream update automation was not started.
+
 ## 2026-11-07 — Microsoft 365 is outside this OneCLI
 
 Hector added the caveat to [plan/local-onecli.md](plan/local-onecli.md). The local vault has Google, Vercel, and YouTube only. The Community catalog on this VM has no Outlook or other Microsoft app. OneCLI documents those apps as Cloud managed-OAuth or Enterprise with Develom's own Entra app. The note records a loopback Graph broker as the clean path on this image.

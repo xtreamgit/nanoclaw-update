@@ -29,6 +29,8 @@ OneCLI's own docs split Microsoft off from the image this VM runs. [App credenti
 
 Do not put a Microsoft secret in an agent container, in git, or in the public repo. Do not point these agents at `api.onecli.sh` just to borrow OneCLI's Microsoft app.
 
+The read-only mail broker for that path is now in this repo at `src/microsoft-mail/`. The operator steps are `.claude/skills/add-microsoft-mail/SKILL.md`. It is not connected to a tenant yet. It has no send route.
+
 The path that matches this Community install:
 
 1. In the Develom tenant, register a single-tenant Entra app. Prefer a certificate over a client secret. Grant application permissions for the mail and calendar reads that are actually needed, then admin-consent them. Limit the app to specific mailboxes with an Exchange application access policy.
