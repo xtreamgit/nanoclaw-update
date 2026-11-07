@@ -1,7 +1,7 @@
 ---
 type: Brief
 title: Context for this Cursor project
-description: What this nanoclaw-update folder is, what it must not touch, and where the live install and GCE work live.
+description: What this nanoclaw-update folder is, what it must not touch, and where the accepted Saul2 install runs.
 status: current
 created: 2026-11-05
 ---
@@ -10,28 +10,27 @@ created: 2026-11-05
 
 This window is a **sandbox**. It is not the live NanoClaw. Another Cursor chat on the live repo planned a GCE move and asked to follow upstream without editing the running install.
 
-## Two folders (do not mix them)
+## Three copies (do not mix them)
 
-| Role | Path | Git |
+| Role | Where | What it is |
 |---|---|---|
-| **Live Mac install** | `/Users/hd/github.com/xtreamgit/claudecode/AGENT-Installs/nanoclaw` | fork `xtreamgit/nanoclaw`, branch `saul-asdeployed`, version **2.0.64** |
-| **This update clone** | `/Users/hd/github.com/xtreamgit/claudecode/AGENT-Installs/nanoclaw-update` | `upstream` = `nanocoai/nanoclaw` `main`, version **2026.10.1-rc.2**; remote `fork` = `xtreamgit/nanoclaw` |
+| **Live Saul** | `/Users/hd/github.com/xtreamgit/claudecode/AGENT-Installs/nanoclaw` on the Mac | Version **2.0.64**, branch `saul-asdeployed`. Still the live bot. |
+| **Workshop** | This folder, and https://github.com/xtreamgit/nanoclaw-update | Version **2026.10.1-rc.2**. Source shelf. Do not put secrets here. |
+| **Saul2** | GCP `nanoclaw-update-vm` in `dvlm-develom-ai`, zone `us-central1-a` | Accepted update install. Telegram bot `@saul2_bot`. |
 
-There is **no** GitHub repo named `xtreamgit/nanoclaw-update`. This folder is local only.
+`nanoclaw-vm` (`10.1.0.2`) is the older practice machine. Leave it alone until Hector says to delete it.
 
 ## Rules
 
-* Do not edit, merge into, or restart the live folder.
-* Do not copy `data/`, `.env`, `CLAUDE.local.md`, or OneCLI into this clone unless the operator asks.
-* Do not turn on Telegram here (the Mac still owns the bot).
-* First catch-up is about **1,425 commits** (May 2.0.64 → Oct 2026.10.x). Do it by hand here, then consider automation. Never auto-merge into live.
+* Do not edit, merge into, or restart the live Mac folder.
+* Do not copy the live Telegram token, `TASK_INJECT_SECRET`, or other secrets into the public repo.
+* Do not point the live bot at the VM. Saul2 uses its own bot.
+* Do not promote this VM over the Mac until Hector asks. The trial week is the current use.
 
-## Live install and GCE (status 2026-11-05)
+## Saul2 (accepted 2026-11-07)
 
-Parallel test VM `nanoclaw-vm` in GCP project `dvlm-develom-ai` (us-central1-a, no external IP, IAP SSH). State restored from a **2026-11-04 ~10:22 PT** backup. `CLAUDE.local.md` files match the Mac; session DBs and two Saul auto-memory files on the Mac are newer. Telegram is off on the VM; recurring tasks are paused. CLI chat to test-agent works; `chat-saul.sh` on the VM talks to Saul without Telegram.
-
-Full plan: live repo `nanoclaw-bundle/gce-deployment/plan.md` and `cursor-files/status.md`.
+Hector accepted this install after the warm reply test: Saul2 answered in 2.4 seconds, and the live Saul answered in 8 seconds. OneCLI on the VM has the same 12 connections as the live gateway. Recurring tasks stay paused. How to start the VM and open Telegram or the console is in [plan/saul2.md](plan/saul2.md).
 
 ## Operator
 
-`hector@develom.com`. Prefer a human gate before promoting anything from this clone to live or to the VM.
+`hector@develom.com`. A later cutover, either keeping the Mac live or moving the real bot to this VM, waits for him.
