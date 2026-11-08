@@ -35,11 +35,15 @@
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "mail-broker": "tsx src/microsoft-mail/main.ts",
+    "mail-broker:setup": "tsx src/microsoft-mail/setup.ts"
   },
   "dependencies": {
+    "@chat-adapter/telegram": "4.41.1",
     "@clack/core": "^1.2.0",
     "@clack/prompts": "^1.2.0",
+    "@onecli-sh/sdk": "2.2.1",
     "better-sqlite3": "13.0.3",
     "chat": "4.41.1",
     "cron-parser": "5.5.0",
