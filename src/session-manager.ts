@@ -5,6 +5,7 @@
 import { AsyncLocalStorage } from 'async_hooks';
 import fs from 'fs';
 import path from 'path';
+import Database from 'better-sqlite3';
 
 import { AnchoredDir } from './anchored-dir.js';
 import { deriveAttachmentName } from './attachment-naming.js';
@@ -26,6 +27,7 @@ import {
 } from './db/sessions.js';
 import { log } from './log.js';
 import { getAgentMailbox, type InboundMessage, type MailboxSession } from './mailbox/index.js';
+import { inboundDbPath } from './mailbox/sqlite/paths.js';
 import { enqueueSessionReconcile } from './reconcile-feeds.js';
 import type { Session } from './types.js';
 
@@ -265,8 +267,18 @@ export async function writeSessionRouting(agentGroupId: string, sessionId: strin
   log.debug('Session routing written', { sessionId, channelType, platformId, threadId: session.thread_id });
 }
 
+/** Result of writing one inbound row. A Telegram replay of an id already stored is a duplicate, not an error. */
+export type SessionMessageWrite =
+  | { status: 'stored'; id: string }
+  | { status: 'duplicate'; id: string; pending: boolean };
+
 /**
  * Write a message to a session's inbound mailbox. Host-only.
+ *
+ * `messages_in.id` is the primary key. Telegram redelivers the same message id,
+ * and an edit arrives on that same id with new text. A unique violation on the
+ * same visible text is a duplicate. Different text is stored under a new id so
+ * the edit is not discarded.
  */
 export async function writeSessionMessage(
   agentGroupId: string,
@@ -300,7 +312,7 @@ export async function writeSessionMessage(
      */
     onWake?: boolean;
   },
-): Promise<void> {
+): Promise<SessionMessageWrite> {
   // Documented reset: operators `rm -rf` a session folder to clear a stuck
   // session. The sessions row survives, so the next message takes the
   // existing-session path and lands here with a missing mailbox — the open
@@ -311,28 +323,90 @@ export async function writeSessionMessage(
 
   // Extract base64 attachment data, save to inbox, replace with file paths
   const content = extractAttachmentFiles(agentGroupId, sessionId, message.id, message.content);
+  const row = {
+    id: message.id,
+    kind: message.kind,
+    timestamp: message.timestamp,
+    platformId: message.platformId ?? null,
+    channelType: message.channelType ?? null,
+    threadId: message.threadId ?? null,
+    content,
+    processAfter: message.processAfter ?? null,
+    recurrence: message.recurrence ?? null,
+    trigger: message.trigger ?? true,
+    sourceSessionId: message.sourceSessionId ?? null,
+    onWake: message.onWake ?? false,
+  };
 
-  await withMailboxSession(agentGroupId, sessionId, async (mailbox) => {
-    await mailbox.insertMessage({
-      id: message.id,
-      kind: message.kind,
-      timestamp: message.timestamp,
-      platformId: message.platformId ?? null,
-      channelType: message.channelType ?? null,
-      threadId: message.threadId ?? null,
-      content,
-      processAfter: message.processAfter ?? null,
-      recurrence: message.recurrence ?? null,
-      trigger: message.trigger ?? true,
-      sourceSessionId: message.sourceSessionId ?? null,
-      onWake: message.onWake ?? false,
+  try {
+    await withMailboxSession(agentGroupId, sessionId, async (mailbox) => {
+      await mailbox.insertMessage(row);
     });
-  });
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error;
+    const existing = readInboundMessage(agentGroupId, sessionId, message.id);
+    if (!existing || visibleText(existing.content) !== visibleText(content)) {
+      const id = `${message.id}:${generateId()}`;
+      if (!existing) {
+        log.warn('Inbound id collision had no stored row; storing under a new id', {
+          sessionId,
+          existingId: message.id,
+          id,
+        });
+      } else {
+        log.warn('Inbound id already stored with different text; storing under a new id', {
+          sessionId,
+          existingId: message.id,
+          id,
+        });
+      }
+      await withMailboxSession(agentGroupId, sessionId, async (mailbox) => {
+        await mailbox.insertMessage({ ...row, id });
+      });
+      await noteSessionActivity(sessionId);
+      return { status: 'stored', id };
+    }
+    return { status: 'duplicate', id: message.id, pending: existing.status === 'pending' };
+  }
+
+  await noteSessionActivity(sessionId);
+  return { status: 'stored', id: message.id };
+}
+
+async function noteSessionActivity(sessionId: string): Promise<void> {
   await updateSession(sessionId, { last_active: new Date().toISOString() });
   // Ask for a prompt reconcile now that the message is durable: a wake that
   // fails transiently is retried within the queue's cadence instead of
   // waiting for the next resync tick. No-op when the sweep isn't running.
   enqueueSessionReconcile(sessionId);
+}
+
+/** Text the user sees. Falls back to the raw payload when it is not JSON with a string `text`. */
+function visibleText(content: string): string {
+  try {
+    const parsed = JSON.parse(content) as { text?: unknown };
+    if (parsed && typeof parsed.text === 'string') return parsed.text;
+  } catch {
+    // Raw channel text, not a JSON envelope.
+  }
+  return content;
+}
+
+function readInboundMessage(
+  agentGroupId: string,
+  sessionId: string,
+  id: string,
+): { content: string; status: string } | undefined {
+  const db = new Database(inboundDbPath(agentGroupId, sessionId), { readonly: true, fileMustExist: true });
+  try {
+    const row = db.prepare('SELECT content, status FROM messages_in WHERE id = ?').get(id) as
+      | { content: string; status: string | null }
+      | undefined;
+    if (!row) return undefined;
+    return { content: row.content, status: row.status ?? 'pending' };
+  } finally {
+    db.close();
+  }
 }
 
 /**

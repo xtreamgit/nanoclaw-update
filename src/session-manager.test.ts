@@ -248,7 +248,7 @@ describe('writeSessionMessage re-provisions a deleted session folder', () => {
         threadId: null,
         content: JSON.stringify({ text: 'still here?' }),
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ status: 'stored', id: 'after-reset-1' });
 
     // The folder + inbound.db are back and the message landed.
     expect(fs.existsSync(inboundDbPath(AG, SESS))).toBe(true);
