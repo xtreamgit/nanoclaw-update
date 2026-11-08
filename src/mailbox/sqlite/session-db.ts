@@ -7,8 +7,10 @@
  */
 import Database from 'better-sqlite3';
 
+import { isUniqueViolation } from '../../db/errors.js';
+import { log } from '../../log.js';
 import { createInboundRecord } from '../model.js';
-import type { InboundWrite } from '../model.js';
+import type { InboundRecord, InboundWrite } from '../model.js';
 import { INBOUND_SCHEMA, OUTBOUND_SCHEMA } from './schema.js';
 
 /** Apply the inbound or outbound schema to a DB file. Idempotent. */
@@ -93,16 +95,70 @@ export function nextEvenSeq(db: Database.Database): number {
   return maxSeq < 2 ? 2 : maxSeq + 2 - (maxSeq % 2);
 }
 
-export function insertMessage(db: Database.Database, message: InboundWrite, sequence = nextEvenSeq(db)): void {
-  const record = createInboundRecord(message, sequence);
-  db.prepare(
-    `INSERT INTO messages_in (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content, process_after, recurrence, series_id, trigger, source_session_id, on_wake)
-     VALUES (@id, @sequence, @kind, @timestamp, @status, @platformId, @channelType, @threadId, @content, @processAfter, @recurrence, @seriesId, @trigger, @sourceSessionId, @onWake)`,
-  ).run({
+const INSERT_INBOUND = `INSERT INTO messages_in (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content, process_after, recurrence, series_id, trigger, source_session_id, on_wake)
+     VALUES (@id, @sequence, @kind, @timestamp, @status, @platformId, @channelType, @threadId, @content, @processAfter, @recurrence, @seriesId, @trigger, @sourceSessionId, @onWake)`;
+
+function insertInboundRow(db: Database.Database, record: InboundRecord): void {
+  db.prepare(INSERT_INBOUND).run({
     ...record,
     trigger: record.trigger ? 1 : 0,
     onWake: record.onWake ? 1 : 0,
   });
+}
+
+/** True only for the messages_in primary key. A seq UNIQUE failure is a different error. */
+function isMessagesInIdConflict(error: unknown): boolean {
+  return isUniqueViolation(error) && error instanceof Error && /\bmessages_in\.id\b/.test(error.message);
+}
+
+function storedContent(db: Database.Database, id: string): string | undefined {
+  const row = db.prepare('SELECT content FROM messages_in WHERE id = ?').get(id) as { content: string } | undefined;
+  return row?.content;
+}
+
+/**
+ * Lowest unused `${collidingId}#N` (N starts at 2). Null when that content is
+ * already stored under one of those ids — a redelivery of the rewritten row.
+ */
+function collisionSuffixId(db: Database.Database, collidingId: string, content: string): string | null {
+  const lookup = db.prepare('SELECT content FROM messages_in WHERE id = ?');
+  for (let n = 2; n < 10_000; n++) {
+    const candidate = `${collidingId}#${n}`;
+    const row = lookup.get(candidate) as { content: string } | undefined;
+    if (!row) return candidate;
+    if (row.content === content) return null;
+  }
+  throw new Error(`messages_in id collision exhausted suffixes for ${collidingId}`);
+}
+
+/**
+ * Insert one inbound row.
+ *
+ * `messages_in.id` is the primary key. Routed chat uses
+ * `${platformMessageId}:${agentGroupId}`, so a channel redelivery or a
+ * reused platform id collides inside one session:
+ * - same content: keep the existing row and return (the write succeeded);
+ * - different content: store the new text under `${id}#N` and log both ids.
+ * Any other SQLite error, including a `messages_in.seq` unique violation, is rethrown.
+ */
+export function insertMessage(db: Database.Database, message: InboundWrite, sequence = nextEvenSeq(db)): void {
+  const record = createInboundRecord(message, sequence);
+  try {
+    insertInboundRow(db, record);
+  } catch (error) {
+    if (!isMessagesInIdConflict(error)) throw error;
+    const existing = storedContent(db, record.id);
+    if (existing === record.content) return;
+    // The conflicting row disappeared between the insert and the read.
+    if (existing === undefined) throw error;
+    const newId = collisionSuffixId(db, record.id, record.content);
+    if (newId === null) return;
+    insertInboundRow(db, createInboundRecord({ ...message, id: newId }, sequence));
+    log.warn('Inbound id collided with different content; stored under a new id', {
+      collidingId: record.id,
+      newId,
+    });
+  }
 }
 
 export function countDueMessages(db: Database.Database): number {

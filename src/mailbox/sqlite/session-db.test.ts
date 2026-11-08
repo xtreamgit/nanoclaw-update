@@ -7,9 +7,17 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
-import { describe, it, expect, afterEach } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ensureSchema, getInboundSourceSessionId, migrateMessagesInTable, syncProcessingAcks } from './session-db.js';
+import { log } from '../../log.js';
+import type { InboundWrite } from '../model.js';
+import {
+  ensureSchema,
+  getInboundSourceSessionId,
+  insertMessage,
+  migrateMessagesInTable,
+  syncProcessingAcks,
+} from './session-db.js';
 
 const TEST_DIR = '/tmp/nanoclaw-session-db-test';
 const DB_PATH = path.join(TEST_DIR, 'inbound.db');
@@ -152,5 +160,110 @@ describe('syncProcessingAcks — script-skip counter', () => {
     syncProcessingAcks(inDb, outDb);
 
     expect(status(inDb, 't1')).toBe('completed');
+  });
+});
+
+describe('insertMessage id collision', () => {
+  function freshInbound(): Database.Database {
+    if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true });
+    fs.mkdirSync(TEST_DIR, { recursive: true });
+    ensureSchema(DB_PATH, 'inbound');
+    return new Database(DB_PATH);
+  }
+
+  function chat(id: string, content: string): InboundWrite {
+    return {
+      id,
+      kind: 'chat',
+      timestamp: '2026-11-08T18:46:33.000Z',
+      platformId: 'telegram:42',
+      channelType: 'telegram',
+      threadId: null,
+      content,
+      processAfter: null,
+      recurrence: null,
+    };
+  }
+
+  const rows = (db: Database.Database) =>
+    db.prepare('SELECT id, seq, status, content, series_id FROM messages_in ORDER BY seq').all() as Array<{
+      id: string;
+      seq: number;
+      status: string;
+      content: string;
+      series_id: string;
+    }>;
+
+  it('keeps the existing row when the same id is redelivered with the same content', () => {
+    const db = freshInbound();
+    const message = chat('tg-1:ag-1', '{"text":"hello"}');
+    insertMessage(db, message, 2);
+    db.prepare("UPDATE messages_in SET status = 'completed' WHERE id = ?").run(message.id);
+
+    insertMessage(db, { ...message, timestamp: '2026-11-08T18:47:00.000Z' }, 4);
+
+    expect(rows(db)).toEqual([
+      {
+        id: 'tg-1:ag-1',
+        seq: 2,
+        status: 'completed',
+        content: '{"text":"hello"}',
+        series_id: 'tg-1:ag-1',
+      },
+    ]);
+    db.close();
+  });
+
+  it('stores different content under a new id and logs both ids', () => {
+    const db = freshInbound();
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    insertMessage(db, chat('tg-1:ag-1', '{"text":"hello"}'), 2);
+
+    insertMessage(db, chat('tg-1:ag-1', '{"text":"the new text"}'), 4);
+
+    expect(rows(db)).toEqual([
+      {
+        id: 'tg-1:ag-1',
+        seq: 2,
+        status: 'pending',
+        content: '{"text":"hello"}',
+        series_id: 'tg-1:ag-1',
+      },
+      {
+        id: 'tg-1:ag-1#2',
+        seq: 4,
+        status: 'pending',
+        content: '{"text":"the new text"}',
+        series_id: 'tg-1:ag-1#2',
+      },
+    ]);
+    expect(warn).toHaveBeenCalledWith('Inbound id collided with different content; stored under a new id', {
+      collidingId: 'tg-1:ag-1',
+      newId: 'tg-1:ag-1#2',
+    });
+
+    // Redelivery of the rewritten text is a no-op, not another row.
+    insertMessage(db, chat('tg-1:ag-1', '{"text":"the new text"}'), 6);
+    expect(rows(db)).toHaveLength(2);
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    insertMessage(db, chat('tg-1:ag-1', '{"text":"a third text"}'), 6);
+    expect(rows(db).map((row) => row.id)).toEqual(['tg-1:ag-1', 'tg-1:ag-1#2', 'tg-1:ag-1#3']);
+    warn.mockRestore();
+    db.close();
+  });
+
+  it('rethrows SQLite errors that are not a messages_in.id conflict', () => {
+    const db = freshInbound();
+    insertMessage(db, chat('tg-1:ag-1', '{"text":"hello"}'), 2);
+
+    expect(() => insertMessage(db, chat('tg-2:ag-1', '{"text":"other"}'), 2)).toThrow(
+      /UNIQUE constraint failed: messages_in\.seq/,
+    );
+    expect(rows(db)).toHaveLength(1);
+
+    db.exec('DROP TABLE messages_in');
+    expect(() => insertMessage(db, chat('tg-3:ag-1', '{"text":"dropped"}'), 4)).toThrow(/no such table/i);
+    db.close();
   });
 });
