@@ -34,36 +34,77 @@ async function handle(
     return;
   }
 
-  const list = url.pathname === '/v1/messages';
-  const one = url.pathname.match(/^\/v1\/messages\/([^/]+)$/);
-  if (!list && !one) {
+  const mailbox = url.searchParams.get('mailbox') ?? '';
+  const route = routeFor(url.pathname);
+  if (!route) {
     send(response, 404, { error: 'not found' });
     return;
   }
-
-  const mailbox = url.searchParams.get('mailbox') ?? '';
   if (!mailboxAllowed(config, mailbox)) {
     send(response, 403, { error: 'mailbox is not allowed' });
     return;
   }
 
   try {
-    if (list) {
-      const top = clampTop(url.searchParams.get('top'));
-      const messages = await reader.listMessages(mailbox, top);
-      send(response, 200, { mailbox, messages });
+    const top = clampTop(url.searchParams.get('top'));
+    if (route.kind === 'messages') {
+      send(response, 200, { mailbox, messages: await reader.listMessages(mailbox, top) });
       return;
     }
-    const id = decodeURIComponent(one?.[1] ?? '');
-    if (!MESSAGE_ID.test(id)) {
-      send(response, 400, { error: 'invalid message id' });
+    if (route.kind === 'message') {
+      send(response, 200, await reader.getMessage(mailbox, route.id));
       return;
     }
-    send(response, 200, await reader.getMessage(mailbox, id));
+    if (route.kind === 'events') {
+      const window = eventWindow(url);
+      if (!window) {
+        send(response, 400, { error: 'start and end must be ISO dates' });
+        return;
+      }
+      send(response, 200, { mailbox, events: await reader.listEvents(mailbox, window.start, window.end, top) });
+      return;
+    }
+    if (route.kind === 'workbooks') {
+      send(response, 200, { mailbox, workbooks: await reader.listWorkbooks(mailbox, top) });
+      return;
+    }
+    send(response, 200, await reader.readWorkbook(mailbox, route.id));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'read failed';
     send(response, 502, { error: message });
   }
+}
+
+type Route =
+  | { kind: 'messages' }
+  | { kind: 'message'; id: string }
+  | { kind: 'events' }
+  | { kind: 'workbooks' }
+  | { kind: 'workbook'; id: string };
+
+function routeFor(pathname: string): Route | undefined {
+  if (pathname === '/v1/messages') return { kind: 'messages' };
+  if (pathname === '/v1/events') return { kind: 'events' };
+  if (pathname === '/v1/workbooks') return { kind: 'workbooks' };
+  const message = pathname.match(/^\/v1\/messages\/([^/]+)$/);
+  if (message) return idRoute('message', message[1]);
+  const workbook = pathname.match(/^\/v1\/workbooks\/([^/]+)$/);
+  if (workbook) return idRoute('workbook', workbook[1]);
+  return undefined;
+}
+
+function idRoute(kind: 'message' | 'workbook', raw: string): Route | undefined {
+  const id = decodeURIComponent(raw);
+  if (!MESSAGE_ID.test(id)) return undefined;
+  return { kind, id };
+}
+
+function eventWindow(url: URL): { start: string; end: string } | undefined {
+  const start = url.searchParams.get('start');
+  const end = url.searchParams.get('end');
+  if (!start || !end) return undefined;
+  if (Number.isNaN(Date.parse(start)) || Number.isNaN(Date.parse(end))) return undefined;
+  return { start: new Date(start).toISOString(), end: new Date(end).toISOString() };
 }
 
 function authorized(request: IncomingMessage, expected: string): boolean {

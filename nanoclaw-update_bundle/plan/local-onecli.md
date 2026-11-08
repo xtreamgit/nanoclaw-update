@@ -29,13 +29,15 @@ OneCLI's own docs split Microsoft off from the image this VM runs. [App credenti
 
 Do not put a Microsoft secret in an agent container, in git, or in the public repo. Do not point these agents at `api.onecli.sh` just to borrow OneCLI's Microsoft app.
 
-The read-only mail broker for that path is now in this repo at `src/microsoft-mail/`. The operator steps are `.claude/skills/add-microsoft-mail/SKILL.md`. It is not connected to a tenant yet. It has no send route.
+The template broker is `src/microsoft-mail/`. Each client supplies one Entra app and one `~/microsoft-mail.env`, written by `pnpm run mail-broker:setup` on the machine that will run the broker. The same file covers mail, calendar, and Excel reads. The repo and the VM image do not contain those credentials. The broker does not send mail. How to enter the Entra values, and which machine gets the file, is in [microsoft-mail.md](microsoft-mail.md).
+
+On 2026-11-07 that file was written on the Mac workshop at `/Users/hd/microsoft-mail.env`, then copied to `/home/nanoclaw/microsoft-mail.env` on the practice VM. `nanoclaw-mail-broker.service` listens on the Docker bridge, `172.17.0.1:10256`. Mail and calendar reads succeeded. Excel is still refused. Saul's folder has the local token in `.microsoft-mail-token`.
 
 The path that matches this Community install:
 
-1. In the Develom tenant, register a single-tenant Entra app. Prefer a certificate over a client secret. Grant application permissions for the mail and calendar reads that are actually needed, then admin-consent them. Limit the app to specific mailboxes with an Exchange application access policy.
-2. Run a small Graph broker on the VM, bound to loopback, next to OneCLI. It holds the certificate, asks Microsoft for tokens, and calls `graph.microsoft.com`. Agents call the broker. They never see the certificate or the token.
-3. Start with read. Mail send and calendar writes stay behind NanoClaw's existing approval gate.
+1. In the client's tenant, register one single-tenant Entra app. Grant the Microsoft Graph application permissions `Mail.Read`, `Calendars.Read`, and `Files.Read.All`, then admin-consent them. Limit mail and calendar with an Exchange application access policy.
+2. Run the Graph broker on that client's host, next to OneCLI. The credential file stays on that host. Agents call the broker with the local token. They do not receive the Microsoft secret.
+3. Reads work as soon as the broker is up. Mail send and calendar writes stay behind NanoClaw's approval gate until those routes are added.
 4. Keep OneCLI as the gateway for the Google, Vercel, and YouTube connections it already has.
 
 Buying OneCLI Enterprise and connecting Outlook through the local gateway is the other clean option. That still uses Develom's Entra app, and the tokens stay on the VM. It is a license choice, not a requirement that the mailbox traffic go through the OneCLI website.

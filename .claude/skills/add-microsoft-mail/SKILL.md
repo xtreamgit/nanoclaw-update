@@ -1,61 +1,90 @@
 ---
 name: add-microsoft-mail
-description: Run the host-side Microsoft mail broker so chosen NanoClaw agents can read specific mailboxes. Use when connecting Outlook or Microsoft 365 mail without OneCLI Cloud.
+description: Connect one client's Microsoft 365 tenant to the NanoClaw template. Use when a client needs Outlook mail, calendar, and Excel reads without OneCLI Cloud.
 ---
 
 # Add Microsoft mail
 
-This installs nothing into OneCLI. The broker is already in this repo at `src/microsoft-mail/`. It runs on the host, holds the Microsoft credential, and answers read-only inbox calls. Agents never receive the certificate or the client secret. Sending mail is not implemented.
+The NanoClaw checkout is the template. It contains no client tenant, no client secret, and no mailbox list. Each client gets one Entra app and one credential file on that client's machine. Copying the VM or the repo does not copy those credentials.
 
-OneCLI Community does not include Outlook. Leave the Google, Vercel, and YouTube connections on the local OneCLI gateway.
+The broker reads mail, calendar, and Excel for the mailboxes named in that file. It does not send mail or edit the calendar or a workbook. The Microsoft credential stays on the host.
 
-## 1. Register the app in the client's tenant
+## 1. Create the client's app
 
-In Microsoft Entra, register a single-tenant app. Add the application permission `Mail.Read` and grant admin consent. Prefer a certificate. A client secret works for a first read, and a certificate is what a client install should keep.
+Do this in the client's own Microsoft tenant. Sign in as an admin for that tenant.
 
-Limit the app to the mailboxes it may read with an Exchange application access policy. The broker also refuses any mailbox that is not listed in `MICROSOFT_MAIL_MAILBOXES`.
+1. Open [Entra admin center](https://entra.microsoft.com) → **Identity** → **Applications** → **App registrations** → **New registration**.
+2. Name it `NanoClaw`. Supported account types: **Accounts in this organizational directory only**. No redirect URI. Register.
+3. Copy **Application (client) ID** and **Directory (tenant) ID**.
+4. **Certificates & secrets** → **New client secret**. Copy the secret value immediately. A certificate is preferable for a lasting install: upload the public certificate here and keep the private key on the host.
+5. **API permissions** → **Add a permission** → **Microsoft Graph** → **Application permissions**. Add:
+   - `Mail.Read`
+   - `Calendars.Read`
+   - `Files.Read.All` (Excel and the user's OneDrive files)
+6. **Grant admin consent** for the tenant. Every row should say granted.
 
-Put the certificate and private key outside the repo, mode `600`, owned by the host user. Do not commit them.
+Then limit mail and calendar to the people this client wants agents to read. In Exchange Online PowerShell, as that tenant's admin:
 
-## 2. Configure the host
-
-Create a local token with `openssl rand -hex 32`. Write these values where the process can read them and git cannot. On a NanoClaw host that is a file such as `/home/nanoclaw/microsoft-mail.env`, mode `600`:
-
-```bash
-MICROSOFT_MAIL_TENANT_ID=
-MICROSOFT_MAIL_CLIENT_ID=
-MICROSOFT_MAIL_CERT_PATH=
-MICROSOFT_MAIL_KEY_PATH=
-MICROSOFT_MAIL_TOKEN=
-MICROSOFT_MAIL_MAILBOXES=person@client.example
-MICROSOFT_MAIL_BIND=127.0.0.1
-MICROSOFT_MAIL_PORT=10256
+```powershell
+New-ApplicationAccessPolicy -AppId <client-id> -PolicyScopeGroupId <mail-enabled-security-group> -AccessRight RestrictAccess -Description "NanoClaw read"
 ```
 
-Use `MICROSOFT_MAIL_CLIENT_SECRET` only when there is no certificate, and then omit the cert paths. `MICROSOFT_MAIL_BIND` stays `127.0.0.1` until an agent container must reach the broker. On Linux, set it to the Docker bridge address (`ip -4 addr show docker0`) so containers can use `host.docker.internal` and the host's public interfaces still do not listen. Do not bind `0.0.0.0` on a machine that has a public address.
+The group contains only the mailboxes for this client. `Files.Read.All` is not limited by that Exchange policy. The broker still refuses any user who is not listed in the credential file, and it only opens that user's own drive.
 
-## 3. Start it
+Word, Teams, and the rest of Microsoft 365 are not separate logins. They are more Graph permissions on this same app, added later. Do not create a second app per product.
 
-From the checkout:
+## 2. Enter the credentials
+
+On the host, from the checkout, run:
+
+```bash
+pnpm run mail-broker:setup
+```
+
+The command asks for the tenant ID, the client ID, the mailboxes, and the secret. The secret is not shown as you type. It writes `~/microsoft-mail.env` with mode `600` and generates the local agent token. It does not print the secret or the token.
+
+To replace a client's file:
+
+```bash
+pnpm run mail-broker:setup -- --replace yes
+```
+
+A certificate install answers `certificate` and gives the two PEM paths. Those files stay outside the repo, mode `600`.
+
+The file is gitignored. Do not copy it into the checkout, into NanoClaw's `.env`, or into an agent container.
+
+## 3. Start the broker
+
+On the host, set `MICROSOFT_MAIL_BIND` to the Docker bridge address (`ip -4 addr show docker0`, usually `172.17.0.1`) when agent containers must reach the broker. Leave it at `127.0.0.1` when only the host itself calls the broker. Do not use `0.0.0.0` on a machine with a public address.
 
 ```bash
 set -a
-source /home/nanoclaw/microsoft-mail.env
+source "$HOME/microsoft-mail.env"
 set +a
 pnpm run mail-broker
 ```
 
-`GET /health` returns `{"status":"ok"}` with no token. A mailbox read requires `Authorization: Bearer` and the local token. Confirm with a mailbox from the list, then confirm a mailbox that is not on the list is refused.
+On the template VM the host user is `nanoclaw` and the file is `/home/nanoclaw/microsoft-mail.env`. Install `setup/systemd/nanoclaw-mail-broker.service` so the broker comes back on boot. Health is `GET` on the bind address, port `10256`, and returns `{"status":"ok"}`. Containers call `http://host.docker.internal:10256`.
 
-After `pnpm run build`, a service can run `node dist/microsoft-mail/main.js` with the same environment file. Do not add the Microsoft values to NanoClaw's `.env` if that file is ever copied, and do not put them in an agent container.
+## 4. Confirm the three reads
 
-## 4. Let one agent read
-
-Give only the chosen group the broker URL and the local token, in that group's own instructions or container environment. The Microsoft credential stays on the host. The agent calls:
+Use the local token from the credential file. Do not send it in chat.
 
 ```bash
 curl -sS -H "Authorization: Bearer $MICROSOFT_MAIL_TOKEN" \
-  "http://host.docker.internal:10256/v1/messages?mailbox=person@client.example&top=5"
+  "http://127.0.0.1:10256/v1/messages?mailbox=person@client.example&top=5"
+
+curl -sS -H "Authorization: Bearer $MICROSOFT_MAIL_TOKEN" \
+  "http://127.0.0.1:10256/v1/events?mailbox=person@client.example&start=2026-11-09T00:00:00Z&end=2026-11-16T00:00:00Z"
+
+curl -sS -H "Authorization: Bearer $MICROSOFT_MAIL_TOKEN" \
+  "http://127.0.0.1:10256/v1/workbooks?mailbox=person@client.example"
 ```
 
-One message is `GET /v1/messages/<id>?mailbox=person@client.example`. There is no send route. Calendar write is not part of this broker.
+One message is `GET /v1/messages/<id>?mailbox=...`. One sheet is `GET /v1/workbooks/<id>?mailbox=...`. A mailbox that is not in the file is refused. Excel files are `.xlsx`, `.xlsm`, and `.xls` in that user's OneDrive.
+
+## 5. Give one agent the local token
+
+Write only the local token, one line, to `groups/<folder>/.microsoft-mail-token` with mode `600`. Tell that group in `instructions.prepend.md` that the broker is `http://host.docker.internal:10256` and that the token is that file. Do not put `MICROSOFT_MAIL_TOKEN` in the container environment: a name ending in `_TOKEN` is refused at spawn. Do not put the token in the instructions file. The Microsoft client secret stays in the host file.
+
+The instruction is composed into the group document on the next session start. Repeat sections 1 and 2 for every new client. The template image does not change.

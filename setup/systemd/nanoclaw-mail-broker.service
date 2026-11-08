@@ -1,0 +1,21 @@
+[Unit]
+Description=NanoClaw Microsoft mail broker
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=nanoclaw
+Group=nanoclaw
+WorkingDirectory=/home/nanoclaw/nanoclaw-update
+Environment=HOME=/home/nanoclaw
+Environment=PATH=/usr/bin:/usr/local/bin:/bin:/home/nanoclaw/.local/bin
+EnvironmentFile=/home/nanoclaw/microsoft-mail.env
+ExecStart=/home/nanoclaw/.local/bin/pnpm run mail-broker
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/nanoclaw/nanoclaw-update/logs/mail-broker.log
+StandardError=append:/home/nanoclaw/nanoclaw-update/logs/mail-broker.log
+
+[Install]
+WantedBy=multi-user.target

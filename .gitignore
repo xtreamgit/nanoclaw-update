@@ -28,6 +28,8 @@ groups
 *.keys.json
 .env
 .env*
+# Per-client Microsoft broker credentials. The template never contains these.
+microsoft-mail.env
 
 # Temp files
 .tmp-*

@@ -14,4 +14,5 @@ Read this first in the `nanoclaw-update` Cursor window. This bundle is only cont
 * [Saul2](plan/saul2.md) - bring up the accepted update install and open it in Telegram and the OneCLI console
 * [OneCLI connections](plan/onecli-connections.md) - reach the practice gateway and compare its app connections with the live Mac gateway
 * [Local OneCLI](plan/local-onecli.md) - Develom can host one OneCLI per client and share it across that client's agents
+* [Microsoft credentials](plan/microsoft-mail.md) - write one client's Entra app into `~/microsoft-mail.env` on the machine that runs the broker
 * [Network diagram](nanoclaw-update-vm-network.pdf) - practice VM, VPC, Mac paths, and what a future Kubernetes move has to replace

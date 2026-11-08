@@ -1,5 +1,17 @@
 # Log
 
+## 2026-11-07 — Saul can reach the mail broker
+
+`nanoclaw-mail-broker.service` is enabled on `nanoclaw-update-vm` and listens on `172.17.0.1:10256`. A container fetched health through `host.docker.internal`. Saul's `.microsoft-mail-token` is mode `600`, and `instructions.prepend.md` points at that file without including the token. The instruction is composed on the next session start. `nanoclaw.service` was not restarted. Excel is still refused.
+
+## 2026-11-07 — Microsoft broker is running on the practice VM
+
+`pnpm run mail-broker:setup` on `nanoclaw-update-vm` failed with `ERR_PNPM_NO_SCRIPT`. That checkout is `70a06b93` and has no broker. The broker source and `/home/nanoclaw/microsoft-mail.env` were copied from the Mac. The VM broker is listening on `127.0.0.1:10256`. Mail returned 3 messages and the calendar returned 5 events. Excel is still refused. `git pull` was not run, and `nanoclaw.service` was not restarted. Procedure: [plan/microsoft-mail.md](plan/microsoft-mail.md).
+
+## 2026-11-07 — Microsoft credential file location
+
+Recorded where `~/microsoft-mail.env` has to live. The broker reads the environment of the machine it is started on, so Saul2 needs `/home/nanoclaw/microsoft-mail.env` on the practice VM. The Mac workshop file `/Users/hd/microsoft-mail.env` was written the same day for `hector@develom.com` and `robert@develom.com` and does not reach the VM. The Entra **Value** goes at Client secret. The Secret ID is the portal label. Procedure: [plan/microsoft-mail.md](plan/microsoft-mail.md). The broker has not been started.
+
 ## 2026-11-07 — Microsoft mail read broker
 
 Added a host-side broker at `src/microsoft-mail/` and the `/add-microsoft-mail` skill. It reads listed mailboxes through Microsoft Graph and has no send route. The Microsoft credential stays on the host. No tenant is connected yet. Upstream update automation was not started.

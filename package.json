@@ -33,6 +33,7 @@
     "release-notes": "node scripts/release-notes.mjs",
     "chat": "tsx scripts/chat.ts",
     "mail-broker": "tsx src/microsoft-mail/main.ts",
+    "mail-broker:setup": "tsx src/microsoft-mail/setup.ts",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "test": "vitest run",

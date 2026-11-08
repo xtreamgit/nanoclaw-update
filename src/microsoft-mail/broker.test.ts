@@ -154,6 +154,56 @@ describe('microsoft mail broker', () => {
     );
   });
 
+  it('reads calendar events and an Excel sheet for an allowed mailbox', async () => {
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = String(input);
+      if (url.includes('/oauth2/')) return Response.json({ access_token: 'graph-token', expires_in: 3600 });
+      if (url.includes('/calendarView')) {
+        return Response.json({
+          value: [
+            {
+              id: 'evt-1',
+              subject: 'Standup',
+              start: { dateTime: '2026-11-09T16:00:00.0000000' },
+              end: { dateTime: '2026-11-09T16:30:00.0000000' },
+              organizer: { emailAddress: { address: 'hector@develom.com' } },
+              location: { displayName: 'Room 2' },
+            },
+          ],
+        });
+      }
+      if (url.includes("search(q='.xlsx')")) {
+        return Response.json({
+          value: [
+            { id: 'wb-1', name: 'Budget.xlsx', file: {}, lastModifiedDateTime: '2026-11-01T00:00:00Z' },
+            { id: 'doc-1', name: 'Notes.docx', file: {} },
+          ],
+        });
+      }
+      if (url.includes('/workbook/worksheets/') && url.includes('usedRange')) {
+        return Response.json({ address: 'A1:B1', values: [['Name', 'Amount']] });
+      }
+      if (url.includes('/workbook/worksheets')) return Response.json({ value: [{ id: 'sheet-1', name: 'Sheet1' }] });
+      return Response.json({ value: [] });
+    };
+    const server = createMailBroker(config(), fetchImpl);
+    servers.push(server);
+    const port = await listen(server);
+    const events = await get(
+      port,
+      '/v1/events?mailbox=hector@develom.com&start=2026-11-09T00:00:00Z&end=2026-11-10T00:00:00Z',
+      TOKEN,
+    );
+    expect(events.status).toBe(200);
+    expect(events.body.events).toMatchObject([{ id: 'evt-1', subject: 'Standup', location: 'Room 2' }]);
+    const books = await get(port, '/v1/workbooks?mailbox=hector@develom.com', TOKEN);
+    expect(books.body.workbooks).toEqual([
+      { id: 'wb-1', name: 'Budget.xlsx', lastModifiedDateTime: '2026-11-01T00:00:00Z' },
+    ]);
+    const sheet = await get(port, '/v1/workbooks/wb-1?mailbox=hector@develom.com', TOKEN);
+    expect(sheet.body.rows).toEqual([['Name', 'Amount']]);
+  });
+
   it('refuses to start without a mailbox list', () => {
     expect(() =>
       loadMailBrokerConfig({
