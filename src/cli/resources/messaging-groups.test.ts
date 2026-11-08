@@ -554,8 +554,8 @@ describe('messaging-groups CLI delete cascades dependent rows', () => {
     }
 
     /** What routeAgentMessage writes, through the real inbox write and its last_active bump. */
-    const deliverPeerMessage = () =>
-      sessionManager.writeSessionMessage(SHARED_AG, SHARED, {
+    const deliverPeerMessage = async (): Promise<void> => {
+      await sessionManager.writeSessionMessage(SHARED_AG, SHARED, {
         id: 'a2a-late',
         kind: 'chat',
         timestamp: now(),
@@ -564,6 +564,7 @@ describe('messaging-groups CLI delete cascades dependent rows', () => {
         content: '{}',
         sourceSessionId: 'sess-on-peer',
       });
+    };
 
     it('keeps a session that receives a peer message after the peer scan read it', async () => {
       await wire(MG, 'shared');
