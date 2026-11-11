@@ -5,7 +5,6 @@
 import { AsyncLocalStorage } from 'async_hooks';
 import fs from 'fs';
 import path from 'path';
-import Database from 'better-sqlite3';
 
 import { AnchoredDir } from './anchored-dir.js';
 import { deriveAttachmentName } from './attachment-naming.js';
@@ -27,7 +26,6 @@ import {
 } from './db/sessions.js';
 import { log } from './log.js';
 import { getAgentMailbox, type InboundMessage, type MailboxSession } from './mailbox/index.js';
-import { inboundDbPath } from './mailbox/sqlite/paths.js';
 import { enqueueSessionReconcile } from './reconcile-feeds.js';
 import type { Session } from './types.js';
 
@@ -275,10 +273,10 @@ export type SessionMessageWrite =
 /**
  * Write a message to a session's inbound mailbox. Host-only.
  *
- * `messages_in.id` is the primary key. Telegram redelivers the same message id,
- * and an edit arrives on that same id with new text. A unique violation on the
- * same visible text is a duplicate. Different text is stored under a new id so
- * the edit is not discarded.
+ * A normal store resolves to undefined. `messages_in.id` is the primary key.
+ * Telegram redelivers the same message id, and an edit arrives on that same id
+ * with new text. A unique violation on the same visible text is a duplicate.
+ * Different text is stored under a new id so the edit is not discarded.
  */
 export async function writeSessionMessage(
   agentGroupId: string,
@@ -312,7 +310,7 @@ export async function writeSessionMessage(
      */
     onWake?: boolean;
   },
-): Promise<SessionMessageWrite> {
+): Promise<SessionMessageWrite | undefined> {
   // Documented reset: operators `rm -rf` a session folder to clear a stuck
   // session. The sessions row survives, so the next message takes the
   // existing-session path and lands here with a missing mailbox — the open
@@ -344,7 +342,9 @@ export async function writeSessionMessage(
     });
   } catch (error) {
     if (!isUniqueViolation(error)) throw error;
-    const existing = readInboundMessage(agentGroupId, sessionId, message.id);
+    const existing = await withMailboxSession(agentGroupId, sessionId, (mailbox) =>
+      mailbox.getInboundMessage(message.id),
+    );
     if (!existing || visibleText(existing.content) !== visibleText(content)) {
       const id = `${message.id}:${generateId()}`;
       if (!existing) {
@@ -370,7 +370,6 @@ export async function writeSessionMessage(
   }
 
   await noteSessionActivity(sessionId);
-  return { status: 'stored', id: message.id };
 }
 
 async function noteSessionActivity(sessionId: string): Promise<void> {
@@ -390,23 +389,6 @@ function visibleText(content: string): string {
     // Raw channel text, not a JSON envelope.
   }
   return content;
-}
-
-function readInboundMessage(
-  agentGroupId: string,
-  sessionId: string,
-  id: string,
-): { content: string; status: string } | undefined {
-  const db = new Database(inboundDbPath(agentGroupId, sessionId), { readonly: true, fileMustExist: true });
-  try {
-    const row = db.prepare('SELECT content, status FROM messages_in WHERE id = ?').get(id) as
-      | { content: string; status: string | null }
-      | undefined;
-    if (!row) return undefined;
-    return { content: row.content, status: row.status ?? 'pending' };
-  } finally {
-    db.close();
-  }
 }
 
 /**

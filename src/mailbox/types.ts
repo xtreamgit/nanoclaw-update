@@ -94,6 +94,8 @@ export interface InboundMailbox {
   setRouting(routing: SessionRouting): void;
   replaceDestinations(entries: Destination[]): void;
   insertMessage(message: InboundMessage): Promise<void>;
+  /** The stored inbound row, when this id is already in the mailbox. */
+  getInboundMessage(id: string): { content: string; status: string } | undefined;
   countDueMessages(): number;
   markMessageFailed(messageId: string): void;
   retryWithBackoff(messageId: string, backoffSec: number): void;

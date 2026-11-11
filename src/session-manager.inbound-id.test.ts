@@ -85,7 +85,7 @@ describe('writeSessionMessage duplicate ids', () => {
     const first = await writeSessionMessage(AG, SESS, chat('tg:1', 'hello'));
     const second = await writeSessionMessage(AG, SESS, chat('tg:1', 'hello'));
 
-    expect(first).toEqual({ status: 'stored', id: 'tg:1' });
+    expect(first).toBeUndefined();
     expect(second).toEqual({ status: 'duplicate', id: 'tg:1', pending: true });
     expect(readRows()).toHaveLength(1);
   });
@@ -94,8 +94,8 @@ describe('writeSessionMessage duplicate ids', () => {
     await writeSessionMessage(AG, SESS, chat('tg:1', 'hello'));
     const edited = await writeSessionMessage(AG, SESS, chat('tg:1', 'hello edited'));
 
-    expect(edited.status).toBe('stored');
-    expect(edited.id.startsWith('tg:1:')).toBe(true);
+    expect(edited?.status).toBe('stored');
+    expect(edited && edited.status === 'stored' && edited.id.startsWith('tg:1:')).toBe(true);
     const rows = readRows();
     expect(rows).toHaveLength(2);
     expect(rows.map((row) => JSON.parse(row.content).text)).toEqual(['hello', 'hello edited']);
