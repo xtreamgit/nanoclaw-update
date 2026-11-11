@@ -1,0 +1,58 @@
+# Brings commits from nanocoai/nanoclaw main into this repository as one pull
+# request. Weekdays, once a day, and whenever someone runs it by hand.
+#
+# The upstream repository is public, so the workflow token can fetch it. No
+# extra secret.
+#
+# main is never the push target. New commits land on sync/upstream-main, which
+# is upstream main itself. A clean combination stays a pull request GitHub can
+# merge. An overlap stays a pull request GitHub will not merge until a person
+# chooses the overlapping changes. scripts/sync-upstream.sh asks merge-tree
+# which of those two is true, then discards the tree. It does not write a merge.
+#
+# A merge commit on main keeps the upstream commit as an ancestor, so the next
+# run stops. A squash does not, and the next run opens another pull request.
+#
+# GitHub does not start other workflows from a pull request this token opens.
+# It also refuses to open one at all unless Actions may create pull requests:
+# Settings → Actions → General → Workflow permissions.
+
+name: Sync upstream
+
+on:
+  schedule:
+    # Once each weekday, 13:17 UTC. Weekend upstream commits wait until Monday.
+    - cron: '17 13 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run at a time. A second trigger waits, so two runs cannot open two
+# pull requests.
+concurrency:
+  group: sync-upstream-nanoclaw
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check out this workflow
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Fetch this main and upstream main
+        run: |
+          # The plus updates remote-tracking refs in this job. It does not push.
+          git fetch --no-tags origin +main:refs/remotes/origin/main
+          git fetch --no-tags https://github.com/nanocoai/nanoclaw.git +main:refs/remotes/upstream/main
+
+      - name: Open or update the pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/sync-upstream.sh
