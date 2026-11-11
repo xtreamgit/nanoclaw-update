@@ -105,6 +105,14 @@ export function insertMessage(db: Database.Database, message: InboundWrite, sequ
   });
 }
 
+export function getInboundMessage(db: Database.Database, id: string): { content: string; status: string } | undefined {
+  const row = db.prepare('SELECT content, status FROM messages_in WHERE id = ?').get(id) as
+    | { content: string; status: string | null }
+    | undefined;
+  if (!row) return undefined;
+  return { content: row.content, status: row.status ?? 'pending' };
+}
+
 export function countDueMessages(db: Database.Database): number {
   return (
     db

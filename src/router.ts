@@ -600,9 +600,9 @@ async function deliverToAgent(
     await backfillSession(agentGroup, session, mg, { created });
   }
 
-  const messageId = messageIdForAgent(event.message.id, agent.agent_group_id);
-  await writeSessionMessage(session.agent_group_id, session.id, {
-    id: messageId,
+  const inboundId = messageIdForAgent(event.message.id, agent.agent_group_id);
+  const written = await writeSessionMessage(session.agent_group_id, session.id, {
+    id: inboundId,
     kind: event.message.kind,
     timestamp: event.message.timestamp,
     platformId: deliveryAddr.platformId,
@@ -611,8 +611,17 @@ async function deliverToAgent(
     content: event.message.content,
     trigger: wake,
   });
+  if (written?.status === 'duplicate' && !written.pending) {
+    log.info('Duplicate inbound ignored', {
+      sessionId: session.id,
+      messageId: written.id,
+      agentGroup: agent.agent_group_id,
+    });
+    return;
+  }
+  const messageId = written?.status === 'stored' ? written.id : inboundId;
 
-  if (wake && created) {
+  if (wake && created && written?.status !== 'duplicate') {
     // A brand-new engaged session: notify registered modules with the
     // resolved wiring context (fire-and-forget — see dispatchSessionCreated).
     dispatchSessionCreated({
