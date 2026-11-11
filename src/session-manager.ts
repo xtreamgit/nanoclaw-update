@@ -273,10 +273,12 @@ export type SessionMessageWrite =
 /**
  * Write a message to a session's inbound mailbox. Host-only.
  *
- * A normal store resolves to undefined. `messages_in.id` is the primary key.
- * Telegram redelivers the same message id, and an edit arrives on that same id
- * with new text. A unique violation on the same visible text is a duplicate.
- * Different text is stored under a new id so the edit is not discarded.
+ * A store into an existing mailbox resolves to undefined. Re-provisioning a
+ * deleted session folder resolves to the stored id. `messages_in.id` is the
+ * primary key. Telegram redelivers the same message id, and an edit arrives
+ * on that same id with new text. A unique violation on the same visible text
+ * is a duplicate. Different text is stored under a new id so the edit is not
+ * discarded.
  */
 export async function writeSessionMessage(
   agentGroupId: string,
@@ -317,6 +319,7 @@ export async function writeSessionMessage(
   // below would throw and the message would be logged-and-dropped forever.
   // Re-provision the folder + mailbox (initSessionFolder is idempotent) so the
   // documented reset actually re-provisions instead of killing the chat.
+  const reprovisioned = !(await getAgentMailbox().exists(mailboxKey(agentGroupId, sessionId)));
   initSessionFolder(agentGroupId, sessionId);
 
   // Extract base64 attachment data, save to inbox, replace with file paths
@@ -370,6 +373,7 @@ export async function writeSessionMessage(
   }
 
   await noteSessionActivity(sessionId);
+  if (reprovisioned) return { status: 'stored', id: message.id };
 }
 
 async function noteSessionActivity(sessionId: string): Promise<void> {
