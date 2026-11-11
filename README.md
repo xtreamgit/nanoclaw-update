@@ -47,6 +47,8 @@ bash nanoclaw.sh
 
 `nanoclaw.sh` walks you from a fresh machine to a named agent you can message. It installs Node, pnpm, and Docker if missing, installs a credential gateway and registers your Anthropic credential with it, builds the agent container, and pairs your first channel (Slack, Telegram, Discord, WhatsApp, iMessage, or a local CLI). If a step fails, Claude Code is invoked automatically to diagnose and resume from where it broke.
 
+This install needed a host fix because Telegram reuses a message id. Same text is kept. Changed text is stored under a new id and routed. The fix is already on main (merge [d175a8b6](https://github.com/xtreamgit/nanoclaw-update/commit/d175a8b659179372faaed98a5b4cd338523e6f17), pull request [#2](https://github.com/xtreamgit/nanoclaw-update/pull/2)).
+
 <details>
 <summary><strong>Migrating from NanoClaw v1?</strong></summary>
 
